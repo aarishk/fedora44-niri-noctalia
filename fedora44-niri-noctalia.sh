@@ -4,8 +4,8 @@
 #
 # Validated against Fedora 44's official packages and upstream documentation
 # on 2026-07-26. This script intentionally:
-#   - uses only Fedora's enabled repositories;
-#   - does not enable COPRs or RPM Fusion;
+#   - uses the repositories already enabled on the host;
+#   - does not enable or modify COPRs, RPM Fusion, or other repositories;
 #   - does not install proprietary GPU drivers;
 #   - does not enable autologin;
 #   - does not remove GNOME or other desktop packages;
@@ -33,11 +33,10 @@ readonly -a PACKAGES=(
   NetworkManager
   NetworkManager-wifi
   adwaita-icon-theme
-  alacritty
+  adw-gtk3-theme
   bluez
-  brightnessctl
+  ddcutil
   firefox
-  fuzzel
   gnome-keyring
   google-noto-color-emoji-fonts
   google-noto-sans-fonts
@@ -46,6 +45,7 @@ readonly -a PACKAGES=(
   gvfs
   gvfs-mtp
   jetbrains-mono-fonts
+  kitty
   mesa-dri-drivers
   mesa-vulkan-drivers
   nautilus
@@ -54,9 +54,10 @@ readonly -a PACKAGES=(
   pipewire
   pipewire-alsa
   pipewire-pulseaudio
-  playerctl
+  papirus-icon-theme
   polkit
   power-profiles-daemon
+  qt6ct
   tuigreet
   upower
   wireplumber
@@ -242,7 +243,7 @@ Planned changes:
 
 Not changed:
   - SELinux, Secure Boot, kernel parameters, firmware, and GPU drivers.
-  - Fedora repositories, COPRs, RPM Fusion, codecs, and Flatpak.
+  - Existing repository configuration, codecs, and Flatpak.
   - Existing desktop packages.
   - Password requirements or autologin.
 EOF
@@ -305,7 +306,7 @@ install_packages() {
   sudo dnf --refresh upgrade -y
 
   info "Installing the validated package set"
-  sudo dnf install -y "${PACKAGES[@]}"
+  sudo dnf install -y --exclude=fuzzel --exclude=swaylock --exclude=waybar "${PACKAGES[@]}"
 }
 
 configure_niri() {
@@ -323,6 +324,18 @@ configure_niri() {
 
   if [[ ! -e "$main_config" ]]; then
     install -m 0644 "$packaged_default" "$main_config"
+    sed -i \
+      -e '/spawn "alacritty"/d' \
+      -e '/spawn "fuzzel"/d' \
+      -e '/spawn "swaylock"/d' \
+      -e '/wpctl set-volume/d' \
+       -e '/wpctl set-mute/d' \
+       -e '/playerctl /d' \
+       -e '/spawn "brightnessctl"/d' \
+       -e '/Mod+Comma  { consume-window-into-column; }/d' \
+       -e '/^    mouse {/,/^    }/ s@^        // accel-profile "flat"@        accel-profile "flat"@' \
+       "$main_config"
+    sed -i '/Mod+Shift+Slash { show-hotkey-overlay; }/a\    Mod+T hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }' "$main_config"
   fi
 
   if ! grep -Fqx "$MANAGED_NIRI_INCLUDE" "$main_config"; then
@@ -355,11 +368,26 @@ binds {
     Mod+S hotkey-overlay-title="Noctalia Control Center" {
         spawn "noctalia" "msg" "panel-toggle" "control-center"
     }
-    Mod+Comma hotkey-overlay-title="Noctalia Settings" {
+    Mod+Shift+Comma hotkey-overlay-title="Noctalia Settings" {
         spawn "noctalia" "msg" "settings-toggle"
+    }
+    Super+Alt+L hotkey-overlay-title="Noctalia Lock Screen" {
+        spawn "noctalia" "msg" "session" "lock"
     }
     Alt+Tab hotkey-overlay-title="Noctalia Window Switcher" {
         spawn "noctalia" "msg" "window-switcher"
+    }
+    Ctrl+Shift+Y hotkey-overlay-title="Noctalia Clipboard" {
+        spawn "noctalia" "msg" "panel-toggle" "clipboard"
+    }
+    Mod+Ctrl+Space hotkey-overlay-title="Noctalia Wallpaper" {
+        spawn "noctalia" "msg" "panel-toggle" "wallpaper"
+    }
+    Mod+Shift+N hotkey-overlay-title="Noctalia Region Screenshot" {
+        spawn "noctalia" "msg" "screenshot-region"
+    }
+    Mod+N hotkey-overlay-title="Noctalia Notifications" {
+        spawn "noctalia" "msg" "panel-toggle" "control-center" "notifications"
     }
 
     XF86AudioRaiseVolume {
@@ -370,6 +398,21 @@ binds {
     }
     XF86AudioMute {
         spawn "noctalia" "msg" "volume-mute"
+    }
+    XF86AudioMicMute {
+        spawn "noctalia" "msg" "mic-mute"
+    }
+    XF86AudioPlay {
+        spawn "noctalia" "msg" "media" "toggle"
+    }
+    XF86AudioStop {
+        spawn "noctalia" "msg" "media" "stop"
+    }
+    XF86AudioPrev {
+        spawn "noctalia" "msg" "media" "previous"
+    }
+    XF86AudioNext {
+        spawn "noctalia" "msg" "media" "next"
     }
     XF86MonBrightnessUp {
         spawn "noctalia" "msg" "brightness-up"
@@ -402,6 +445,9 @@ telemetry_enabled = false
 
 [notification]
 enable_daemon = true
+
+[brightness]
+enable_ddcutil = true
 EOF
 
   info "Validating Noctalia configuration"
@@ -445,11 +491,11 @@ verify_installation() {
   local item
 
   info "Installed package versions"
-  rpm -q niri noctalia greetd tuigreet xwayland-satellite ||
+  rpm -q niri noctalia greetd tuigreet xwayland-satellite ddcutil qt6ct ||
     failed=1
 
   info "Required commands"
-  for item in niri niri-session noctalia tuigreet xwayland-satellite; do
+  for item in niri niri-session noctalia tuigreet xwayland-satellite ddcutil qt6ct; do
     if command -v "$item" >/dev/null 2>&1; then
       printf '  OK  %s -> %s\n' "$item" "$(command -v "$item")"
     else
@@ -543,7 +589,9 @@ Useful keys:
   Super+T       terminal
   Super+Space   Noctalia launcher
   Super+S       Noctalia control center
-  Super+,       Noctalia settings
+  Super+Shift+, Noctalia settings
+  Super+N       Noctalia notifications
+  Super+Shift+N region screenshot
   Super+Shift+E exit Niri
 EOF
 }
